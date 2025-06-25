@@ -1,0 +1,7 @@
+*.png
+*/
+/*
+!/*.*
+*.png
+.DS_Store
+test.py
