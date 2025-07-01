@@ -1,56 +1,18 @@
-import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.manifold import TSNE
 
-from torch_geometric_temporal.signal import temporal_signal_split
-from torch_geometric_temporal.dataset import ChickenpoxDatasetLoader
-from torch_geometric_temporal.nn.recurrent import GConvLSTM
+horizon = 1
 
-class ChickenpoxGConvLSTM(torch.nn.Module):
-    def __init__(self, node_features, hidden_channels):
-        super().__init__()
-        self.recurrent = GConvLSTM(
-            in_channels=node_features,
-            out_channels=hidden_channels,
-            K=2
-        )
-        self.linear = torch.nn.Linear(hidden_channels, 1)
+# Load saved evaluation results
+eval_data = np.load('eval.npz')
+preds     = eval_data['preds']    # shape: (T, N)
+targets   = eval_data['targets']  # shape: (T, N)
+T, N      = preds.shape
 
-    def forward(self, x, edge_index, edge_weight, h, c):
-        h, c = self.recurrent(x, edge_index, edge_weight, h, c)
-        out = self.linear(h)
-        return out, h, c
-
-# Load data & model
-dataset        = ChickenpoxDatasetLoader().get_dataset()
-_, test_dataset = temporal_signal_split(dataset, train_ratio=0.8)
-
-node_features   = dataset[0].x.shape[1]
-hidden_channels = 32
-
-model = ChickenpoxGConvLSTM(node_features, hidden_channels)
-model.load_state_dict(torch.load('gconvlstm.pth'))
-model.eval()
-
-preds, targets = [], []
-h, c = None, None
-
-with torch.no_grad():
-    for snapshot in test_dataset:
-        x, ei, ew, y = snapshot.x, snapshot.edge_index, snapshot.edge_attr, snapshot.y
-        y_hat, h, c = model(x, ei, ew, h, c)
-        preds.append(y_hat.squeeze().cpu().numpy())
-        targets.append(y.cpu().numpy())
-
-preds   = np.stack(preds)   
-targets = np.stack(targets) 
-
-# County-level plots
-T, N = preds.shape
+#County-level plots
 cols = 4
 rows = (N + cols - 1) // cols
-fig, axes = plt.subplots(rows, cols, figsize=(20, 5*rows))
+fig, axes = plt.subplots(rows, cols, figsize=(20, 5 * rows))
 axes = axes.flatten()
 
 for i in range(N):
@@ -59,38 +21,45 @@ for i in range(N):
     axes[i].set_title(f'County {i}')
     axes[i].legend(frameon=False)
 
-#Remove empty subplots
-for j in range(N, len(axes)):
-    fig.delaxes(axes[j])
+for ax in axes[N:]:
+    fig.delaxes(ax)
 
-plt.tight_layout()
-plt.savefig('county_level_predictions.pdf')
-plt.show()
+fig.tight_layout()
+fig.savefig(f'county_level_predictions_h{horizon}.pdf')
+plt.close(fig)
 
-# Validation loss over epochs
-loss_data = np.load('losses.npz')
-val_losses = loss_data['val']
+# 3) Loss over epochs
+loss_data    = np.load('losses.npz')
+train_losses = loss_data['train']
+val_losses   = loss_data['val']
 
 plt.figure()
-plt.plot(val_losses)
-plt.title("Validation Loss over Epochs")
+plt.plot(train_losses, label='Train Loss')
+plt.plot(val_losses,   label='Validation Loss')
+plt.title("Loss over Epochs")
 plt.xlabel("Epoch")
 plt.ylabel("MSE Loss")
+plt.legend(frameon=False)
 plt.tight_layout()
-plt.savefig('validation_loss.pdf')
-plt.show()
+plt.savefig('loss_over_epochs.pdf')
+plt.close()
 
+# National-level plot
+national_pred = preds.sum(axis=1)
+national_true = targets.sum(axis=1)
 
-# National-level plot 
 plt.figure()
-plt.plot(preds.sum(axis=1),   label="Predicted")
-plt.plot(targets.sum(axis=1), label="Actual")
-plt.title("National Level Cases (Test)")
-plt.xlabel("Week index")
+plt.plot(national_pred, label="Predicted Total")
+plt.plot(national_true, label="Actual Total")
+plt.title(f"National Level Cases (Test, t+{horizon})")
+plt.xlabel("Time Step")
 plt.ylabel("Total Cases")
 plt.legend(frameon=False)
 plt.tight_layout()
 plt.savefig('national_level_test.pdf')
-plt.show()
+plt.close()
 
-print('all plots saved')
+print(f"All plots saved:\n"
+      f" • county_level_predictions_h{horizon}.pdf\n"
+      f" • loss_over_epochs.pdf\n"
+      f" • national_level_test.pdf")
