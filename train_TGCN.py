@@ -41,7 +41,7 @@ class TGru(torch.nn.Module):
         return self.head(h), h
 
 in_dim = train[0].x.size(1)
-model  = TGru(in_dim, hidden_dim)                 # ← use TGru
+model  = TGru(in_dim, hidden_dim)
 opt    = torch.optim.Adam(model.parameters(), lr=lr)
 loss_f = torch.nn.MSELoss()
 
