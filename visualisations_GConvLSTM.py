@@ -5,8 +5,8 @@ horizon = 1
 
 # Load saved evaluation results
 eval_data = np.load('eval.npz')
-preds     = eval_data['preds']    # shape: (T, N)
-targets   = eval_data['targets']  # shape: (T, N)
+preds     = eval_data['preds']
+targets   = eval_data['targets']
 T, N      = preds.shape
 
 #County-level plots
