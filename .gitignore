@@ -5,3 +5,6 @@
 *.png
 .DS_Store
 test.py
+*.pdf
+*.pth
+*.npz
