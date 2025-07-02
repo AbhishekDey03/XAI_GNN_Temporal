@@ -7,10 +7,27 @@ from torch_geometric_temporal.nn.recurrent import TGCN
 from sklearn.preprocessing import StandardScaler
 
 horizon, hidden_dim, epochs, lr = 1, 8, 40, 1e-3
+
 # DataLoad
 dataset = MontevideoBusDatasetLoader().get_dataset()
 train_iter, test_iter = temporal_signal_split(dataset, train_ratio=0.8)
 train, test = list(train_iter), list(test_iter)
+
+# Scale data
+scaler_X = StandardScaler()
+scaler_y = StandardScaler()
+# gather train-set feature & target arrays
+X_train = np.vstack([snap.x.numpy() for snap in train])
+y_train = np.concatenate([snap.y.numpy() for snap in train]).reshape(-1, 1)
+scaler_X.fit(X_train)
+scaler_y.fit(y_train)
+# apply to both train and test
+for ds in (train, test):
+    for snap in ds:
+        x_np = snap.x.numpy()
+        y_np = snap.y.numpy().reshape(-1, 1)
+        snap.x = torch.from_numpy(scaler_X.transform(x_np)).float()
+        snap.y = torch.from_numpy(scaler_y.transform(y_np).flatten()).float()
 
 # Model
 class TGru(torch.nn.Module):
@@ -66,6 +83,10 @@ with torch.no_grad():
         h = h.detach()
 
 preds, targets = np.stack(preds), np.stack(targets)
+
+# Inverse-transform back to original scale
+preds = scaler_y.inverse_transform(preds.reshape(-1,1)).reshape(preds.shape)
+targets = scaler_y.inverse_transform(targets.reshape(-1,1)).reshape(targets.shape)
 
 y_true = targets.sum(axis=1)
 y_pred = preds.sum(axis=1)
