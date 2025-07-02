@@ -1,33 +1,16 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from torch_geometric_temporal.dataset import ChickenpoxDatasetLoader
+from torch_geometric_temporal.dataset import MontevideoBusDatasetLoader
 from torch_geometric_temporal.signal import temporal_signal_split
 from torch_geometric_temporal.nn.recurrent import TGCN
 from sklearn.preprocessing import StandardScaler
 
-
-horizon, hidden_dim, epochs, lr = 1, 16, 10, 1e-3
-
+horizon, hidden_dim, epochs, lr = 1, 8, 40, 1e-3
 # DataLoad
-raw = ChickenpoxDatasetLoader().get_dataset()
-train_iter, test_iter = temporal_signal_split(raw, train_ratio=0.9)
+dataset = MontevideoBusDatasetLoader().get_dataset()
+train_iter, test_iter = temporal_signal_split(dataset, train_ratio=0.8)
 train, test = list(train_iter), list(test_iter)
-
-# Scale the data
-scaler_X = StandardScaler(); scaler_y = StandardScaler()
-X_train = np.vstack([d.x.numpy() for d in train])
-y_train = np.concatenate([d.y.numpy() for d in train])
-
-scaler_X.fit(X_train)
-scaler_y.fit(y_train.reshape(-1, 1))
-
-for dataset in (train, test):
-    for d in dataset:
-        d.x = torch.from_numpy(scaler_X.transform(d.x.numpy())).float()
-        d.y = torch.from_numpy(
-            scaler_y.transform(d.y.numpy().reshape(-1,1)).flatten()
-        ).float()
 
 # Model
 class TGru(torch.nn.Module):
@@ -58,7 +41,7 @@ for ep in range(1, epochs + 1):
         h = h.detach(); loss_sum += loss.item()
     train_losses.append(loss_sum / (len(train) - horizon))
 
-    # Validation Loop
+    # Validation
     model.eval(); h = None; val_sum = 0
     with torch.no_grad():
         for t in range(len(test) - horizon):
@@ -72,7 +55,7 @@ for ep in range(1, epochs + 1):
 
 np.savez('losses.npz', train=np.array(train_losses), val=np.array(val_losses))
 
-# evaluation 
+# Evaluation
 model.eval(); h = None; preds, targets = [], []
 with torch.no_grad():
     for t in range(len(test) - horizon):
@@ -83,17 +66,39 @@ with torch.no_grad():
         h = h.detach()
 
 preds, targets = np.stack(preds), np.stack(targets)
-preds   = scaler_y.inverse_transform(preds.reshape(-1,1)).reshape(preds.shape)
-targets = scaler_y.inverse_transform(targets.reshape(-1,1)).reshape(targets.shape)
-np.savez('eval.npz', preds=preds, targets=targets)
 
-# plot
-plt.figure(figsize=(8, 3))
-plt.plot(preds.sum(1),   label='Predicted')
-plt.plot(targets.sum(1), label='Actual')
-plt.title(f'Chickenpox t+{horizon}')
-plt.xlabel('Week'); plt.ylabel('Cases')
-plt.legend(frameon=False); plt.tight_layout()
-plt.savefig(f'forecast_h{horizon}.pdf'); plt.close()
+y_true = targets.sum(axis=1)
+y_pred = preds.sum(axis=1)
 
-torch.save(model.state_dict(), f'tgcn_h{horizon}.pth')
+# compute metrics
+errors = y_pred - y_true
+mae  = np.mean(np.abs(errors))
+rmse = np.sqrt(np.mean(errors**2))
+
+# two‐panel figure
+fig, (ax_ts, ax_sc) = plt.subplots(1, 2, figsize=(12, 4))
+
+# time series
+ax_ts.plot(y_true, label='Actual', linewidth=1.5)
+ax_ts.plot(y_pred, label='Predicted', linestyle='--', linewidth=1.5)
+ax_ts.set_title(f'Time Series (t+{horizon})')
+ax_ts.set_xlabel('Time step')
+ax_ts.set_ylabel('Total Inflow')
+ax_ts.legend(frameon=False)
+ax_ts.text(0.05, 0.9,
+           f'MAE:  {mae:.2f}\nRMSE: {rmse:.2f}',
+           transform=ax_ts.transAxes,
+           bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+
+# scatter plot
+ax_sc.scatter(y_true, y_pred, s=10, alpha=0.6)
+minv = min(y_true.min(), y_pred.min())
+maxv = max(y_true.max(), y_pred.max())
+ax_sc.plot([minv, maxv], [minv, maxv], 'k--', linewidth=1)
+ax_sc.set_title('Predicted vs. Actual')
+ax_sc.set_xlabel('Actual total inflow')
+ax_sc.set_ylabel('Predicted total inflow')
+
+plt.tight_layout()
+plt.savefig(f'forecast_performance_h{horizon}_TGCN.pdf')
+plt.close()
