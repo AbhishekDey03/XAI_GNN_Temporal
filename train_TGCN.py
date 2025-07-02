@@ -6,7 +6,7 @@ from torch_geometric_temporal.signal import temporal_signal_split
 from torch_geometric_temporal.nn.recurrent import TGCN
 from sklearn.preprocessing import StandardScaler
 
-horizon, hidden_dim, epochs, lr = 1, 8, 40, 1e-3
+horizon, hidden_dim, epochs, lr = 1, 16, 500, 1e-4
 
 # DataLoad
 dataset = MontevideoBusDatasetLoader().get_dataset()

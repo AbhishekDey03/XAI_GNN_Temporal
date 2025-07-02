@@ -9,3 +9,4 @@ test.py
 *.pth
 *.npz
 visualisations.py
+visualise.py
