@@ -6,28 +6,38 @@ from torch_geometric_temporal.signal import temporal_signal_split
 from torch_geometric_temporal.nn.recurrent import GConvLSTM
 from sklearn.preprocessing import StandardScaler
 
+# Hyper-parameters
 horizon, hidden_dim, epochs, lr = 1, 16, 500, 1e-4
+
+# Device selection
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f'Using device: {device}')
 
 # DataLoad
 dataset = MontevideoBusDatasetLoader().get_dataset()
 train_iter, test_iter = temporal_signal_split(dataset, train_ratio=0.8)
 train, test = list(train_iter), list(test_iter)
 
-# Scale data
+# Scale data on CPU
 scaler_X = StandardScaler()
 scaler_y = StandardScaler()
 X_train = np.vstack([snap.x.numpy() for snap in train])
 y_train = np.concatenate([snap.y.numpy() for snap in train]).reshape(-1, 1)
 scaler_X.fit(X_train)
 scaler_y.fit(y_train)
+
+# Apply scaling AND move to device
 for ds in (train, test):
     for snap in ds:
         x_np = snap.x.numpy()
         y_np = snap.y.numpy().reshape(-1, 1)
-        snap.x = torch.from_numpy(scaler_X.transform(x_np)).float()
-        snap.y = torch.from_numpy(scaler_y.transform(y_np).flatten()).float()
+        snap.x = torch.from_numpy(scaler_X.transform(x_np)).float().to(device)
+        snap.y = torch.from_numpy(scaler_y.transform(y_np).flatten()).float().to(device)
+        # also move graph structure to device
+        snap.edge_index = snap.edge_index.to(device)
+        snap.edge_attr  = snap.edge_attr.to(device)
 
-# Model
+# Model definition
 class GCLSTM(torch.nn.Module):
     def __init__(self, in_dim, hidden):
         super().__init__()
@@ -38,26 +48,34 @@ class GCLSTM(torch.nn.Module):
         h, c = self.rnn(x, ei, ew, h, c)
         return self.head(h), h, c
 
+# Instantiate and move model to device
 in_dim = train[0].x.size(1)
-model  = GCLSTM(in_dim, hidden_dim)
+model  = GCLSTM(in_dim, hidden_dim).to(device)
 opt    = torch.optim.Adam(model.parameters(), lr=lr)
 loss_f = torch.nn.MSELoss()
 
 # Training
 train_losses, val_losses = [], []
 for ep in range(1, epochs + 1):
-    model.train(); h = c = None; loss_sum = 0
+    model.train()
+    h = c = None
+    loss_sum = 0.0
     for t in range(len(train) - horizon):
         src, tgt = train[t], train[t + horizon]
         opt.zero_grad()
         y_hat, h, c = model(src.x, src.edge_index, src.edge_attr, h, c)
         loss = loss_f(y_hat.squeeze(), tgt.y)
-        loss.backward(); opt.step()
-        h, c = h.detach(), c.detach(); loss_sum += loss.item()
+        loss.backward()
+        opt.step()
+        # detach to truncate backprop
+        h, c = h.detach(), c.detach()
+        loss_sum += loss.item()
     train_losses.append(loss_sum / (len(train) - horizon))
 
     # Validation
-    model.eval(); h = c = None; val_sum = 0
+    model.eval()
+    h = c = None
+    val_sum = 0.0
     with torch.no_grad():
         for t in range(len(test) - horizon):
             src, tgt = test[t], test[t + horizon]
@@ -71,7 +89,9 @@ for ep in range(1, epochs + 1):
 np.savez('losses.npz', train=np.array(train_losses), val=np.array(val_losses))
 
 # Evaluation
-model.eval(); h = c = None; preds, targets = [], []
+model.eval()
+h = c = None
+preds, targets = [], []
 with torch.no_grad():
     for t in range(len(test) - horizon):
         src, tgt = test[t], test[t + horizon]
@@ -79,6 +99,7 @@ with torch.no_grad():
         preds.append(y_hat.squeeze().cpu().numpy())
         targets.append(tgt.y.cpu().numpy())
         h, c = h.detach(), c.detach()
+
 preds   = np.stack(preds)
 targets = np.stack(targets)
 
