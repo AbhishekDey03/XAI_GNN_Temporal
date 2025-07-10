@@ -13,48 +13,48 @@ horizon, hidden_dim, epochs, lr = 1, 16, 500, 1e-4
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'Using device: {device}')
 
-# DataLoad
+# Load data
 dataset = MontevideoBusDatasetLoader().get_dataset()
 train_iter, test_iter = temporal_signal_split(dataset, train_ratio=0.8)
 train, test = list(train_iter), list(test_iter)
 
-# Scale data on CPU
-scaler_X = StandardScaler()
-scaler_y = StandardScaler()
-X_train = np.vstack([snap.x.numpy() for snap in train])
-y_train = np.concatenate([snap.y.numpy() for snap in train]).reshape(-1, 1)
-scaler_X.fit(X_train)
-scaler_y.fit(y_train)
+# Fit scaler on combined x and y
+in_dim = train[0].x.size(1)
+scaler_full_ts = StandardScaler()
+train_concat = np.vstack([
+    np.hstack([snap.x.numpy(), snap.y.numpy().reshape(-1, 1)])
+    for snap in train
+])
+scaler_full_ts.fit(train_concat)
 
-# Apply scaling AND move to device
+# Apply scaling to x and y separately
 for ds in (train, test):
     for snap in ds:
         x_np = snap.x.numpy()
         y_np = snap.y.numpy().reshape(-1, 1)
-        snap.x = torch.from_numpy(scaler_X.transform(x_np)).float().to(device)
-        snap.y = torch.from_numpy(scaler_y.transform(y_np).flatten()).float().to(device)
-        # also move graph structure to device
+        xy_np = np.hstack([x_np, y_np])
+        xy_scaled = scaler_full_ts.transform(xy_np)
+        snap.x = torch.from_numpy(xy_scaled[:, :in_dim]).float().to(device)
+        snap.y = torch.from_numpy(xy_scaled[:, in_dim]).float().to(device)
         snap.edge_index = snap.edge_index.to(device)
-        snap.edge_attr  = snap.edge_attr.to(device)
+        snap.edge_attr = snap.edge_attr.to(device)
 
 # Model definition
 class GCLSTM(torch.nn.Module):
     def __init__(self, in_dim, hidden):
         super().__init__()
-        self.rnn  = GConvLSTM(in_channels=in_dim, out_channels=hidden, K=2)
+        self.rnn = GConvLSTM(in_channels=in_dim, out_channels=hidden, K=2)
         self.head = torch.nn.Linear(hidden, 1)
 
     def forward(self, x, ei, ew, h=None, c=None):
         h, c = self.rnn(x, ei, ew, h, c)
         return self.head(h), h, c
 
-# Instantiate and move model to device
-in_dim = train[0].x.size(1)
-model  = GCLSTM(in_dim, hidden_dim).to(device)
-opt    = torch.optim.Adam(model.parameters(), lr=lr)
+model = GCLSTM(in_dim, hidden_dim).to(device)
+opt = torch.optim.Adam(model.parameters(), lr=lr)
 loss_f = torch.nn.MSELoss()
 
-# Training
+# Training loop
 train_losses, val_losses = [], []
 for ep in range(1, epochs + 1):
     model.train()
@@ -67,7 +67,6 @@ for ep in range(1, epochs + 1):
         loss = loss_f(y_hat.squeeze(), tgt.y)
         loss.backward()
         opt.step()
-        # detach to truncate backprop
         h, c = h.detach(), c.detach()
         loss_sum += loss.item()
     train_losses.append(loss_sum / (len(train) - horizon))
@@ -100,25 +99,28 @@ with torch.no_grad():
         targets.append(tgt.y.cpu().numpy())
         h, c = h.detach(), c.detach()
 
-preds   = np.stack(preds)
+preds = np.stack(preds)
 targets = np.stack(targets)
 
-# Inverse-transform back to original scale
-preds   = scaler_y.inverse_transform(preds.reshape(-1,1)).reshape(preds.shape)
-targets = scaler_y.inverse_transform(targets.reshape(-1,1)).reshape(targets.shape)
+# Inverse-transform ONLY the y (last) column
+scale_y = scaler_full_ts.scale_[in_dim]
+mean_y = scaler_full_ts.mean_[in_dim]
+
+preds = preds * scale_y + mean_y
+targets = targets * scale_y + mean_y
 
 y_true = targets.sum(axis=1)
 y_pred = preds.sum(axis=1)
 
-# compute metrics
+# Metrics
 errors = y_pred - y_true
-mae  = np.mean(np.abs(errors))
+mae = np.mean(np.abs(errors))
 rmse = np.sqrt(np.mean(errors**2))
 
-# two-panel figure
+# Plot
 fig, (ax_ts, ax_sc) = plt.subplots(1, 2, figsize=(12, 4))
 
-# time series
+# Time series
 ax_ts.plot(y_true, label='Actual', linewidth=1.5)
 ax_ts.plot(y_pred, label='Predicted', linestyle='--', linewidth=1.5)
 ax_ts.set_title(f'Time Series (t+{horizon})')
@@ -130,7 +132,7 @@ ax_ts.text(0.05, 0.9,
            transform=ax_ts.transAxes,
            bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
 
-# scatter plot
+# Scatter
 ax_sc.scatter(y_true, y_pred, s=10, alpha=0.6)
 minv, maxv = min(y_true.min(), y_pred.min()), max(y_true.max(), y_pred.max())
 ax_sc.plot([minv, maxv], [minv, maxv], 'k--', linewidth=1)
