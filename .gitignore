@@ -11,3 +11,4 @@ test.py
 visualisations.py
 visualise.py
 show_feat.py
+*.sh
