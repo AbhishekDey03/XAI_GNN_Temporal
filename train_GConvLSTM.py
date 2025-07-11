@@ -4,10 +4,11 @@ import matplotlib.pyplot as plt
 from torch_geometric_temporal.dataset import MontevideoBusDatasetLoader
 from torch_geometric_temporal.signal import temporal_signal_split
 from torch_geometric_temporal.nn.recurrent import GConvLSTM
+import torch.nn.functional as F
 from sklearn.preprocessing import StandardScaler
 
 # Hyper-parameters
-horizon, hidden_dim, epochs, lr = 1, 16, 500, 1e-4
+horizon, hidden_dim, epochs, lr = 1, 32, 500, 1e-2
 
 # Device selection
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -15,7 +16,7 @@ print(f'Using device: {device}')
 
 # Load data
 dataset = MontevideoBusDatasetLoader().get_dataset()
-train_iter, test_iter = temporal_signal_split(dataset, train_ratio=0.8)
+train_iter, test_iter = temporal_signal_split(dataset, train_ratio=0.70)
 train, test = list(train_iter), list(test_iter)
 
 # Fit scaler on combined x and y
@@ -48,7 +49,9 @@ class GCLSTM(torch.nn.Module):
 
     def forward(self, x, ei, ew, h=None, c=None):
         h, c = self.rnn(x, ei, ew, h, c)
-        return self.head(h), h, c
+        out = self.head(h)
+        out = F.relu(out)
+        return out, h, c
 
 model = GCLSTM(in_dim, hidden_dim).to(device)
 opt = torch.optim.Adam(model.parameters(), lr=lr)
