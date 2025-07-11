@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from sklearn.preprocessing import StandardScaler
 
 # Hyper-parameters
-horizon, hidden_dim, epochs, lr = 1, 32, 500, 1e-2
+horizon, hidden_dim, epochs, lr = 1, 16, 200, 1e-3
 
 # Device selection
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -16,7 +16,7 @@ print(f'Using device: {device}')
 
 # Load data
 dataset = MontevideoBusDatasetLoader().get_dataset()
-train_iter, test_iter = temporal_signal_split(dataset, train_ratio=0.70)
+train_iter, test_iter = temporal_signal_split(dataset, train_ratio=0.2)
 train, test = list(train_iter), list(test_iter)
 
 # Fit scaler on combined x and y
@@ -49,8 +49,8 @@ class GCLSTM(torch.nn.Module):
 
     def forward(self, x, ei, ew, h=None, c=None):
         h, c = self.rnn(x, ei, ew, h, c)
-        out = self.head(h)
-        out = F.relu(out)
+        out = F.leaky_relu(h)
+        out = self.head(out)
         return out, h, c
 
 model = GCLSTM(in_dim, hidden_dim).to(device)
