@@ -21,7 +21,7 @@ train, test = list(train_iter), list(test_iter)
 
 # Fit scaler on combined x and y
 in_dim = train[0].x.size(1)
-scaler_full_ts = MinMaxScaler()
+scaler_full_ts = StandardScaler()
 train_concat = np.vstack([
     np.hstack([snap.x.numpy(), snap.y.numpy().reshape(-1, 1)])
     for snap in train
