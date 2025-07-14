@@ -5,7 +5,7 @@ from torch_geometric_temporal.dataset import MontevideoBusDatasetLoader
 from torch_geometric_temporal.signal import temporal_signal_split
 from torch_geometric_temporal.nn.recurrent import GConvLSTM
 import torch.nn.functional as F
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler,MinMaxScaler
 
 # Hyper-parameters
 horizon, hidden_dim, epochs, lr = 1, 16, 200, 1e-3
@@ -22,6 +22,7 @@ train, test = list(train_iter), list(test_iter)
 # Fit scaler on combined x and y
 in_dim = train[0].x.size(1)
 scaler_full_ts = StandardScaler()
+#scaler_full_ts = MinMaxScaler()
 train_concat = np.vstack([
     np.hstack([snap.x.numpy(), snap.y.numpy().reshape(-1, 1)])
     for snap in train
@@ -105,12 +106,26 @@ with torch.no_grad():
 preds = np.stack(preds)
 targets = np.stack(targets)
 
-# Inverse-transform ONLY the y (last) column
+
+
+"""
+# Inverse-transform ONLY the y (last) column - MinMaxScaler
+data_min_y = scaler_full_ts.data_min_[in_dim]
+data_max_y = scaler_full_ts.data_max_[in_dim]
+preds = preds * (data_max_y - data_min_y) + data_min_y
+targets = targets * (data_max_y - data_min_y) + data_min_y
+"""
+
+
+
+
+# Inverse-transform ONLY the y (last) column - StandardScaler
 scale_y = scaler_full_ts.scale_[in_dim]
 mean_y = scaler_full_ts.mean_[in_dim]
 
 preds = preds * scale_y + mean_y
 targets = targets * scale_y + mean_y
+
 
 y_true = targets.sum(axis=1)
 y_pred = preds.sum(axis=1)

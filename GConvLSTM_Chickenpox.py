@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from sklearn.preprocessing import StandardScaler,MinMaxScaler
 
 # Hyper-parameters
-horizon, hidden_dim, epochs, lr = 1, 32, 200, 1e-2
+horizon, hidden_dim, epochs, lr = 1, 16, 200, 1e-3
 
 # Device selection
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -16,12 +16,13 @@ print(f'Using device: {device}')
 
 # Load data
 dataset = ChickenpoxDatasetLoader().get_dataset()
-train_iter, test_iter = temporal_signal_split(dataset, train_ratio=0.2)
+train_iter, test_iter = temporal_signal_split(dataset, train_ratio=0.9)
 train, test = list(train_iter), list(test_iter)
 
 # Fit scaler on combined x and y
 in_dim = train[0].x.size(1)
 scaler_full_ts = StandardScaler()
+#scaler_full_ts = MinMaxScaler()
 train_concat = np.vstack([
     np.hstack([snap.x.numpy(), snap.y.numpy().reshape(-1, 1)])
     for snap in train
@@ -49,7 +50,7 @@ class GCLSTM(torch.nn.Module):
 
     def forward(self, x, ei, ew, h=None, c=None):
         h, c = self.rnn(x, ei, ew, h, c)
-        out = F.leaky_relu(h)
+        out = F.relu(h)
         out = self.head(h)
         return out, h, c
 
@@ -105,12 +106,22 @@ with torch.no_grad():
 preds = np.stack(preds)
 targets = np.stack(targets)
 
-# Inverse-transform ONLY the y (last) column
+# Inverse-transform ONLY the y (last) column - StandardScaler
+
+
 scale_y = scaler_full_ts.scale_[in_dim]
 mean_y = scaler_full_ts.mean_[in_dim]
 
 preds = preds * scale_y + mean_y
 targets = targets * scale_y + mean_y
+
+"""
+# Inverse-transform ONLY the y (last) column - MinMaxScaler
+data_min_y = scaler_full_ts.data_min_[in_dim]
+data_max_y = scaler_full_ts.data_max_[in_dim]
+preds = preds * (data_max_y - data_min_y) + data_min_y
+targets = targets * (data_max_y - data_min_y) + data_min_y
+"""
 
 y_true = targets.sum(axis=1)
 y_pred = preds.sum(axis=1)

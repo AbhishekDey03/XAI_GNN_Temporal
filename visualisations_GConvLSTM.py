@@ -9,26 +9,6 @@ preds     = eval_data['preds']     # shape: T × N
 targets   = eval_data['targets']   # shape: T × N
 T, N      = preds.shape
 
-# 1) Node‐level plots
-cols = 4
-N = min(N, 20)
-rows = (N + cols - 1) // cols
-fig, axes = plt.subplots(rows, cols, figsize=(20, 5 * rows))
-axes = axes.flatten()
-for i in range(N):
-    axes[i].plot(preds[:, i],   label='Predicted')
-    axes[i].plot(targets[:, i], label='Actual')
-    axes[i].set_title(f'Node {i} - {model_type} (t+{horizon})')
-    axes[i].legend(frameon=False)
-
-# remove any unused subplots
-for ax in axes[N:]:
-    fig.delaxes(ax)
-
-fig.tight_layout()
-fig.savefig(f'node_level_predictions_h{horizon}_{model_type}.pdf')
-plt.close(fig)
-
 # 2) Loss over epochs
 loss_data    = np.load('losses.npz')
 train_losses = loss_data['train']
@@ -61,6 +41,5 @@ plt.savefig(f'aggregate_inflow_test_{model_type}.pdf')
 plt.close()
 
 print(f"All plots saved:\n"
-      f'node_level_predictions_h{horizon}_{model_type}.pdf\n'
       f'loss_over_epochs_h{horizon}_{model_type}.pdf\n'
       f'aggregate_inflow_test_{model_type}.pdf')
